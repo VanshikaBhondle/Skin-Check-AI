@@ -1,6 +1,6 @@
 # Skin Check AI
 
-An AI skin-health assistant that combines **your own trained image classifier** with **Claude vision**. Upload (or take) a photo of a skin concern, add a few details, and get:
+An AI skin-health assistant that combines **your own trained image classifier** with a **vision AI** (free **Google Gemini** or **Claude**). Upload (or take) a photo of a skin concern, add a few details, and get:
 
 - **Trained model prediction**: an EfficientNet model you train yourself (see `GUIDE.md`) predicts the condition with a confidence score
 - **AI review**: Claude checks the model's prediction against the photo and ranks possible conditions with reasons
@@ -38,7 +38,9 @@ Get an API key at https://console.anthropic.com. Without a key, the app still sh
 ## Configuration (environment variables / Streamlit Secrets)
 | Variable | Default | Purpose |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | - | **Required** for AI analysis |
+| `GEMINI_API_KEY` | - | Free AI option (get it at aistudio.google.com). Used when no Anthropic key is set |
+| `GEMINI_MODEL` | `gemini-flash-latest` | Gemini model (falls back to an available Flash model automatically) |
+| `ANTHROPIC_API_KEY` | - | Paid AI option (Claude). Takes priority if both keys are set |
 | `CLAUDE_MODEL` | `claude-opus-5-5` | Model used |
 | `ADMIN_USER` / `ADMIN_PASS` | `admin` / `admin@skin-check` | Admin login. **Change before deploying.** |
 | `APP_ACCESS_CODE` | *(unset)* | If set, users must enter this code to run analyses |
@@ -67,6 +69,7 @@ MYSQL_SSL = "true"
 | `ui.py` | Visual design: custom CSS, hero, cards, urgency banner (light + dark mode) |
 | `.streamlit/config.toml` | Theme: colours, font, rounded corners, light/dark |
 | `analyzer.py` | Image prep, Claude calls, JSON schema, safety rules, follow-up chat, report |
+| `gemini_ai.py` | Google Gemini provider (free tier) |
 | `classifier.py` | Runs your trained ONNX model (same preprocessing as training) |
 | `db.py` | SQLite / MySQL storage (no photos) |
 | `models/` | Put `skin_model.onnx` + `labels.json` here |

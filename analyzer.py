@@ -1,4 +1,4 @@
-"""Skin photo analysis with Claude vision + rule-based red-flag safety checks."""
+"""Skin photo analysis with an AI vision model (Claude or free Gemini) + rule-based red-flag safety checks."""
 from __future__ import annotations
 
 import base64
@@ -9,6 +9,8 @@ from dataclasses import dataclass, field
 
 import anthropic
 from PIL import Image, ImageOps
+
+import gemini_ai
 
 MODEL = os.getenv("CLAUDE_MODEL", "claude-opus-5-5")
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
@@ -186,6 +188,18 @@ def get_client() -> anthropic.Anthropic | None:
     return anthropic.Anthropic()
 
 
+def ai_provider() -> str | None:
+    """'claude' if an Anthropic key is set, else 'gemini' if a Gemini key is set, else None."""
+    if os.getenv("ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_AUTH_TOKEN"):
+        return "claude"
+    if gemini_ai.api_key():
+        return "gemini"
+    return None
+
+
+PROVIDER_LABEL = {"claude": "Claude", "gemini": "Google Gemini"}
+
+
 def _call(client, **kwargs):
     """One Messages API call with refusal fallback and friendly errors."""
     try:
@@ -223,33 +237,58 @@ def describe_model(preds: list[dict] | None, model_info: str = "") -> str:
             "classifier_assessment say in 1-2 plain sentences whether what you see agrees with it and why.")
 
 
+def _normalise(data: dict) -> dict:
+    """Make any provider's JSON safe to display: fill missing fields, clamp and sort confidences."""
+    defaults = {"is_skin_image": True, "image_quality": {"usable": True, "issues": ""}, "visual_description": "",
+                "possible_conditions": [], "urgency": "routine", "urgency_reason": "", "red_flags": [],
+                "overview": "", "causes": [], "care_routine": [], "lifestyle_tips": [], "when_to_see_doctor": "",
+                "recommendation": "", "classifier_assessment": ""}
+    if not isinstance(data, dict):
+        raise AnalysisError("The AI returned an unreadable answer. Please try again.")
+    for k, v in defaults.items():
+        if data.get(k) is None or not isinstance(data.get(k), type(v)):
+            data[k] = v
+    data["image_quality"].setdefault("usable", True)
+    data["image_quality"].setdefault("issues", "")
+    if data["urgency"] not in URGENCY_ORDER:
+        data["urgency"] = "see_doctor_soon"
+    conds = []
+    for c in data["possible_conditions"]:
+        if isinstance(c, dict) and c.get("name"):
+            try:
+                conf = int(float(c.get("confidence", 0)))
+            except (TypeError, ValueError):
+                conf = 0
+            conds.append({"name": str(c["name"]), "confidence": max(0, min(100, conf)), "why": str(c.get("why", ""))})
+    data["possible_conditions"] = sorted(conds, key=lambda c: -c["confidence"])
+    return data
+
+
 def analyze_image(jpeg: bytes, info: dict, client=None, model_preds: list[dict] | None = None,
                   model_info: str = "") -> Analysis:
-    client = client or get_client()
-    if client is None:
-        raise AnalysisError("AI analysis isn't configured: add ANTHROPIC_API_KEY to the app's Secrets.")
-    resp = _call(
-        client,
-        system=SYSTEM_PROMPT,
-        output_config={"effort": "medium", "format": {"type": "json_schema", "schema": ANALYSIS_SCHEMA}},
-        messages=[{"role": "user", "content": [
-            _image_block(jpeg),
-            {"type": "text", "text": "Details the person entered:\n" + describe_person(info)
-             + "\n\n" + describe_model(model_preds, model_info)
-             + "\n\nAnalyse the photo and fill in every field."},
-        ]}],
-    )
-    try:
-        data = json.loads(_text(resp))
-    except json.JSONDecodeError as e:
-        raise AnalysisError("The AI returned an unreadable answer. Please try again.") from e
-    for c in data["possible_conditions"]:
-        c["confidence"] = max(0, min(100, int(c["confidence"])))
-    data["possible_conditions"].sort(key=lambda c: -c["confidence"])
-
+    prompt = ("Details the person entered:\n" + describe_person(info) + "\n\n" + describe_model(model_preds, model_info)
+              + "\n\nAnalyse the photo and fill in every field.")
+    if client is None and ai_provider() == "gemini":
+        data, model = gemini_ai.analyze(jpeg, prompt, SYSTEM_PROMPT, ANALYSIS_SCHEMA, AnalysisError)
+    else:
+        client = client or get_client()
+        if client is None:
+            raise AnalysisError("AI analysis isn't configured: add GEMINI_API_KEY or ANTHROPIC_API_KEY to Secrets.")
+        resp = _call(
+            client,
+            system=SYSTEM_PROMPT,
+            output_config={"effort": "medium", "format": {"type": "json_schema", "schema": ANALYSIS_SCHEMA}},
+            messages=[{"role": "user", "content": [_image_block(jpeg), {"type": "text", "text": prompt}]}],
+        )
+        try:
+            data = json.loads(_text(resp))
+        except json.JSONDecodeError as e:
+            raise AnalysisError("The AI returned an unreadable answer. Please try again.") from e
+        model = getattr(resp, "model", MODEL)
+    data = _normalise(data)
     rule_level, rule_flags = red_flag_rules(info)
     final = max(data["urgency"], rule_level, key=URGENCY_ORDER.index)
-    return Analysis(data=data, urgency=final, rule_flags=rule_flags, model=getattr(resp, "model", MODEL))
+    return Analysis(data=data, urgency=final, rule_flags=rule_flags, model=model)
 
 
 def start_chat(jpeg: bytes, info: dict, analysis: Analysis, model_preds: list[dict] | None = None,
@@ -257,6 +296,10 @@ def start_chat(jpeg: bytes, info: dict, analysis: Analysis, model_preds: list[di
     """Opening context for follow-up questions: the photo, the details, the model result and the analysis."""
     model_txt = ("\n\nTrained classifier (" + model_info + "): "
                  + "; ".join(f"{p['name']} {p['confidence']}%" for p in model_preds)) if model_preds else ""
+    if ai_provider() == "gemini":
+        return gemini_ai.start_chat(jpeg, "Details the person entered:\n" + describe_person(info) + model_txt
+                                    + "\n\nYour earlier analysis (JSON):\n" + json.dumps(analysis.data)
+                                    + f"\n\nFinal urgency shown to the person after safety rules: {analysis.urgency}.")
     return [{"role": "user", "content": [
         _image_block(jpeg),
         {"type": "text", "text": "Details the person entered:\n" + describe_person(info) + model_txt
@@ -266,7 +309,9 @@ def start_chat(jpeg: bytes, info: dict, analysis: Analysis, model_preds: list[di
 
 
 def ask_followup(history: list[dict], question: str, client=None) -> str:
-    """Append the question, call Claude, append its full reply (unchanged) and return the text."""
+    """Append the question, call the AI, append its full reply (unchanged) and return the text."""
+    if gemini_ai.is_history(history):
+        return gemini_ai.ask(history, question, FOLLOWUP_SYSTEM, AnalysisError, client=client)
     client = client or get_client()
     if client is None:
         raise AnalysisError("AI chat isn't configured: add ANTHROPIC_API_KEY to the app's Secrets.")

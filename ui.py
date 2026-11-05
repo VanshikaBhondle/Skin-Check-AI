@@ -130,12 +130,12 @@ def _html(markup: str) -> None:
     st.markdown(markup, unsafe_allow_html=True)
 
 
-def hero(model_text: str | None, ai_on: bool) -> None:
+def hero(model_text: str | None, ai_name: str | None) -> None:
     pills = []
     if model_text:
         pills.append(f"🧠 {escape(model_text)}")
-    if ai_on:
-        pills.append("🤖 Claude vision AI")
+    if ai_name:
+        pills.append(f"🤖 {escape(ai_name)} vision AI")
     pills += ["🔒 Photos never stored", "⚡ Results in ~20 s"]
     _html(f"""<div class="sc-hero"><span class="sc-eyebrow">AI skin health check</span>
 <h1>Understand your skin,<br>in seconds.</h1>
@@ -197,14 +197,14 @@ def sees(text: str) -> None:
     _html(f'<div class="sc-card sc-sees">👁️ <b>What the AI sees:</b> {escape(text)}</div>')
 
 
-def sidebar_brand(model_text: str | None, ai_on: bool) -> None:
+def sidebar_brand(model_text: str | None, ai_name: str | None) -> None:
     def status(ok: bool, on: str, off: str) -> str:
         color = "#16a34a" if ok else "#9ca3af"
         return f'<div class="sc-status"><span class="sc-dot" style="background:{color}"></span>{escape(on if ok else off)}</div>'
     st.sidebar.markdown('<div class="sc-brand"><div class="sc-logo">🩺</div><div><b>Skin Check AI</b>'
                         '<span>Educational skin assistant</span></div></div>', unsafe_allow_html=True)
     st.sidebar.markdown(status(bool(model_text), f"Trained model · {model_text}" if model_text else "", "Trained model not added")
-                        + status(ai_on, "AI assistant connected", "AI assistant not configured"),
+                        + status(bool(ai_name), f"AI assistant · {ai_name}", "AI assistant not configured"),
                         unsafe_allow_html=True)
 
 

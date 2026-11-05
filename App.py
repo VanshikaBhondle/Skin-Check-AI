@@ -35,12 +35,18 @@ DISCLAIMER = ("**Not a diagnosis.** This tool gives educational AI suggestions f
 
 
 @st.cache_resource
-def get_classifier():
-    """Load the trained model once per server. Returns the classifier, None, or the load error."""
+def _load_classifier(stamp: tuple):
+    """Load the trained model once per model version. Returns the classifier, None, or the load error."""
     try:
         return clf_mod.load()
     except Exception as e:  # e.g. a corrupt or mismatched model file
         return e
+
+
+def get_classifier():
+    """Re-checks the model files every run, so a newly uploaded model is picked up without a reboot."""
+    stamp = tuple(f.stat().st_mtime if f.exists() else 0 for f in (clf_mod.MODEL_PATH, clf_mod.LABELS_PATH))
+    return _load_classifier(stamp)
 
 
 def style_fig(fig, height=300):
@@ -62,16 +68,17 @@ def hbar(df: pd.DataFrame, col: str, title: str, top: int = 10):
     fig = px.bar(data, x="count", y=col, orientation="h", title=title, text="count")
     fig.update_traces(marker_color=BLUE, marker_cornerradius=4, textposition="outside", cliponaxis=False,
                       hovertemplate="%{y}: %{x}<extra></extra>")
-    st.plotly_chart(style_fig(fig, 80 + 34 * len(data)), use_container_width=True)
+    st.plotly_chart(style_fig(fig, 80 + 34 * len(data)), width="stretch")
 
 
 # ============================================================================ analyze
-def analyze_page(clf, ai_ready: bool):
-    ui.hero(f"Trained model · {len(clf.labels)} conditions" if clf else None, ai_ready)
+def analyze_page(clf, ai_name: str | None):
+    ai_ready = ai_name is not None
+    ui.hero(f"Trained model · {len(clf.labels)} conditions" if clf else None, ai_name)
     if not ai_ready and clf is None:
-        st.error("Not set up yet: add a trained model to `models/` and/or `ANTHROPIC_API_KEY` to Secrets.")
+        st.error("Not set up yet: add a trained model to `models/` and/or an AI key (`GEMINI_API_KEY` or `ANTHROPIC_API_KEY`) to Secrets.")
     elif not ai_ready:
-        st.info("Running with the trained model only. Add `ANTHROPIC_API_KEY` for the detailed AI report and chat.")
+        st.info("Running with the trained model only. Add `GEMINI_API_KEY` (free) or `ANTHROPIC_API_KEY` for the detailed AI report and chat.")
     elif clf is None:
         st.info("No trained model in `models/` yet - using the AI's own image analysis.")
     ui.steps()
@@ -86,7 +93,7 @@ def analyze_page(clf, ai_ready: bool):
             cam = st.camera_input("Camera", label_visibility="collapsed")
         src = up or cam
         if src:
-            st.image(src, use_container_width=True)
+            st.image(src, width="stretch")
         with st.expander("💡 Tips for a good photo"):
             st.markdown("- Use daylight, no flash\n- Hold the camera 10-15 cm away, in focus\n"
                         "- Show the whole spot plus a little normal skin around it\n"
@@ -113,8 +120,11 @@ def analyze_page(clf, ai_ready: bool):
             code_ok = hmac.compare_digest(code, ACCESS_CODE)
 
         used = st.session_state.get("used", 0)
-        go = st.button("🔍 Analyze my skin", type="primary", use_container_width=True,
+        go = st.button("🔍 Analyze my skin", type="primary", width="stretch",
                        disabled=not (src and consent and code_ok and (clf or ai_ready)))
+        if az.ai_provider() == "gemini":
+            st.caption("ℹ️ The AI report uses Google Gemini's free tier. Google may use submitted photos and "
+                       "text to improve its services. This app itself does not store photos.")
         if not src:
             st.caption("Add a photo to continue.")
         elif not consent:
@@ -201,7 +211,7 @@ def show_result(a: az.Analysis | None, preds: list[dict] | None, info: dict, mod
 
     if a is None:
         st.info("The detailed report (causes, care routine, when to see a doctor) and the follow-up chat need "
-                "the AI. Add `ANTHROPIC_API_KEY` in Secrets to turn them on.")
+                "the AI. Add `GEMINI_API_KEY` (free) or `ANTHROPIC_API_KEY` in Secrets to turn them on.")
         st.download_button("⬇️ Download report", az.report_markdown(info, None, preds, model_info),
                            "skin-check-report.md", "text/markdown")
         return
@@ -273,7 +283,7 @@ def feedback_page():
         hbar(fb.assign(stars=fb["rating"].astype(int).map(lambda r: "★" * r)), "stars", "Ratings")
         st.subheader("Recent comments")
         st.dataframe(fb[fb["comments"].fillna("") != ""][["name", "rating", "comments", "timestamp"]].head(30),
-                     hide_index=True, use_container_width=True)
+                     hide_index=True, width="stretch")
 
 
 # ============================================================================ admin
@@ -306,7 +316,7 @@ def admin_page():
 
     st.subheader("Analyses")
     st.caption("Photos are never stored - only anonymous details and results.")
-    st.dataframe(df, hide_index=True, use_container_width=True)
+    st.dataframe(df, hide_index=True, width="stretch")
     st.download_button("⬇️ Download CSV", df.to_csv(index=False).encode(), "skin_analyses.csv", "text/csv")
 
     st.subheader("Analytics")
@@ -345,10 +355,10 @@ def admin_page():
         fig.update_traces(marker_color=BLUE, marker_cornerradius=4, hovertemplate="%{x}: %{y}<extra></extra>")
         fig.update_yaxes(gridcolor=GRID)
         fig.update_xaxes(gridcolor="rgba(0,0,0,0)", type="category")
-        st.plotly_chart(style_fig(fig, 300), use_container_width=True)
+        st.plotly_chart(style_fig(fig, 300), width="stretch")
 
     st.subheader("Feedback")
-    st.dataframe(fb, hide_index=True, use_container_width=True)
+    st.dataframe(fb, hide_index=True, width="stretch")
     st.download_button("⬇️ Download feedback CSV", fb.to_csv(index=False).encode(), "skin_feedback.csv", "text/csv")
 
 
@@ -364,7 +374,7 @@ def about_page():
 
 **How it works:** the photo is cleaned (rotation fixed, location data removed, resized). A **trained image
 classifier** (a deep-learning model trained on labelled skin-disease photos) predicts the most likely condition.
-The photo, your details and that prediction then go to Claude, a vision-capable AI model, which checks the
+The photo, your details and that prediction then go to a vision-capable AI model (Google Gemini or Claude), which checks the
 prediction and writes a structured report. The app then applies its own
 **safety rules** to the symptoms you reported and raises the urgency when needed (for example fever with
 spreading redness, or a spot that bleeds or changes).
@@ -379,10 +389,10 @@ CLF = get_classifier()
 if isinstance(CLF, Exception):
     st.warning(f"The trained model couldn't be loaded ({CLF}). Using the AI only.")
     CLF = None
-AI_READY = az.get_client() is not None
+AI_NAME = az.PROVIDER_LABEL.get(az.ai_provider())
 
-ui.sidebar_brand(CLF.short if CLF else None, AI_READY)
-PAGES = {"🔍 Analyze": lambda: analyze_page(CLF, AI_READY), "💬 Feedback": feedback_page,
+ui.sidebar_brand(CLF.short if CLF else None, AI_NAME)
+PAGES = {"🔍 Analyze": lambda: analyze_page(CLF, AI_NAME), "💬 Feedback": feedback_page,
          "ℹ️ About": about_page, "🛠️ Admin": admin_page}
 choice = st.sidebar.radio("Menu", list(PAGES), label_visibility="collapsed")
 st.sidebar.caption("Educational tool - not a medical diagnosis.")
