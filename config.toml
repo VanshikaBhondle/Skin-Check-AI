@@ -1,0 +1,35 @@
+[server]
+maxUploadSize = 10
+
+[client]
+toolbarMode = "minimal"
+
+[theme]
+font = "Plus Jakarta Sans:https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
+headingFont = "Plus Jakarta Sans:https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
+baseRadius = "0.85rem"
+buttonRadius = "0.85rem"
+showWidgetBorder = true
+showSidebarBorder = false
+
+[theme.light]
+primaryColor = "#0f8a7e"
+backgroundColor = "#f6faf9"
+secondaryBackgroundColor = "#eaf3f1"
+textColor = "#10221f"
+borderColor = "#d3e4e0"
+
+[theme.light.sidebar]
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#eef5f3"
+
+[theme.dark]
+primaryColor = "#14a394"
+backgroundColor = "#0b1513"
+secondaryBackgroundColor = "#13211e"
+textColor = "#e4efec"
+borderColor = "#233b36"
+
+[theme.dark.sidebar]
+backgroundColor = "#0f1c19"
+secondaryBackgroundColor = "#16261f"
