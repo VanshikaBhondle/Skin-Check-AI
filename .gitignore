@@ -1,0 +1,5 @@
+skin_data.db
+__pycache__/
+.venv/
+.streamlit/secrets.toml
+.env
