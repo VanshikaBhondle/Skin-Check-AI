@@ -9,8 +9,11 @@ import json
 import os
 
 MODEL = os.getenv("GROQ_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct")
-# Image-capable model name hints, best first; used if the configured model isn't available.
-VISION_HINTS = ("llama-4-maverick", "llama-4-scout", "llama-4", "vision", "vl", "multimodal")
+# Image-capable model name hints, best first; used to order candidates if the configured model isn't available.
+VISION_HINTS = ("llama-4-maverick", "llama-4-scout", "llama-4", "vision", "-vl", "vl-", "multimodal", "omni")
+# Models that can't do image chat at all (speech, safety classifiers, agents) - never tried.
+NOT_CHAT = ("whisper", "tts", "playai", "orpheus", "guard", "compound", "distil", "embed", "allam")
+MAX_CANDIDATES = 8
 _resolved_model: str | None = None
 
 
@@ -25,13 +28,19 @@ def get_client():
     return groq.Groq(api_key=api_key(), max_retries=2, timeout=90)
 
 
-def _pick_vision_model(client, exclude: str) -> str | None:
-    ids = [m.id for m in client.models.list().data if m.id != exclude]
-    for hint in VISION_HINTS:
-        for i in sorted(ids, reverse=True):
-            if hint in i.lower():
-                return i
-    return None
+def _candidates(client, exclude: str) -> list[str]:
+    """Groq's available models, likely image-capable ones first, non-chat models removed."""
+    try:
+        ids = [m.id for m in client.models.list().data if m.id != exclude]
+    except Exception:
+        return []
+    ids = [i for i in ids if not any(w in i.lower() for w in NOT_CHAT)]
+
+    def rank(i: str):
+        low = i.lower()
+        hint = next((n for n, h in enumerate(VISION_HINTS) if h in low), len(VISION_HINTS))
+        return (hint, low)
+    return sorted(ids, key=rank)[:MAX_CANDIDATES]
 
 
 def _is_model_problem(e) -> bool:
@@ -76,11 +85,19 @@ def chat(client, messages: list, AnalysisError, json_mode: bool = False, max_tok
         except groq.APIStatusError as e:
             if not _is_model_problem(e):
                 raise
-            fallback = _pick_vision_model(client, exclude=model)
-            if not fallback:
-                raise
-            _resolved_model = model = fallback
-            resp = client.chat.completions.create(model=model, **kwargs)
+            resp = None
+            for cand in _candidates(client, exclude=model):  # try available models until one accepts the photo
+                try:
+                    resp = client.chat.completions.create(model=cand, **kwargs)
+                except groq.APIStatusError as e2:
+                    if _is_model_problem(e2):
+                        continue
+                    raise
+                _resolved_model = model = cand
+                break
+            if resp is None:
+                raise AnalysisError("None of Groq's current models could read the photo. Set GROQ_MODEL in "
+                                    "Secrets to a Groq vision model (see console.groq.com/docs/vision).") from e
     except AnalysisError:
         raise
     except Exception as e:
