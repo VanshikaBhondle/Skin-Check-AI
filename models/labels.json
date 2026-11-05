@@ -1,0 +1,38 @@
+{
+  "labels": [
+    "Cellulitis",
+    "Impetigo",
+    "Athlete Foot",
+    "Nail Fungus",
+    "Ringworm",
+    "Cutaneous Larva Migrans",
+    "Chickenpox",
+    "Shingles"
+  ],
+  "raw_classes": [
+    "BA- cellulitis",
+    "BA-impetigo",
+    "FU-athlete-foot",
+    "FU-nail-fungus",
+    "FU-ringworm",
+    "PA-cutaneous-larva-migrans",
+    "VI-chickenpox",
+    "VI-shingles"
+  ],
+  "model": "efficientnet_b0",
+  "img_size": 224,
+  "resize": 256,
+  "mean": [
+    0.485,
+    0.456,
+    0.406
+  ],
+  "std": [
+    0.229,
+    0.224,
+    0.225
+  ],
+  "test_accuracy": 0.8974,
+  "macro_f1": 0.8935,
+  "trained_at": "2026-11-05"
+}
