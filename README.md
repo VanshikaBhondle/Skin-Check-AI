@@ -1,6 +1,6 @@
 # Skin Check AI
 
-An AI skin-health assistant that combines **your own trained image classifier** with a **vision AI** (free **Google Gemini** or **Claude**). Upload (or take) a photo of a skin concern, add a few details, and get:
+An AI skin-health assistant that combines **your own trained image classifier** with a **vision AI** (free **Groq** or **Google Gemini**, or **Claude**). Upload (or take) a photo of a skin concern, add a few details, and get:
 
 - **Trained model prediction**: an EfficientNet model you train yourself (see `GUIDE.md`) predicts the condition with a confidence score
 - **AI review**: Claude checks the model's prediction against the photo and ranks possible conditions with reasons
@@ -38,9 +38,11 @@ Get an API key at https://console.anthropic.com. Without a key, the app still sh
 ## Configuration (environment variables / Streamlit Secrets)
 | Variable | Default | Purpose |
 |---|---|---|
+| `GROQ_API_KEY` | - | Free AI option (get it at console.groq.com). Tried before Gemini |
+| `GROQ_MODEL` | `meta-llama/llama-4-scout-17b-16e-instruct` | Groq vision model (falls back to another vision model automatically) |
 | `GEMINI_API_KEY` | - | Free AI option (get it at aistudio.google.com). Used when no Anthropic key is set |
 | `GEMINI_MODEL` | `gemini-flash-latest` | Gemini model (falls back to an available Flash model automatically) |
-| `ANTHROPIC_API_KEY` | - | Paid AI option (Claude). Takes priority if both keys are set |
+| `ANTHROPIC_API_KEY` | - | Paid AI option (Claude). Tried first. If a provider fails, the next configured one is used |
 | `CLAUDE_MODEL` | `claude-opus-5-5` | Model used |
 | `ADMIN_USER` / `ADMIN_PASS` | `admin` / `admin@skin-check` | Admin login. **Change before deploying.** |
 | `APP_ACCESS_CODE` | *(unset)* | If set, users must enter this code to run analyses |
@@ -70,6 +72,7 @@ MYSQL_SSL = "true"
 | `.streamlit/config.toml` | Theme: colours, font, rounded corners, light/dark |
 | `analyzer.py` | Image prep, Claude calls, JSON schema, safety rules, follow-up chat, report |
 | `gemini_ai.py` | Google Gemini provider (free tier) |
+| `groq_ai.py` | Groq provider (free tier, open vision models) |
 | `classifier.py` | Runs your trained ONNX model (same preprocessing as training) |
 | `db.py` | SQLite / MySQL storage (no photos) |
 | `models/` | Put `skin_model.onnx` + `labels.json` here |

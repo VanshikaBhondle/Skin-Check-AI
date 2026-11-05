@@ -11,6 +11,7 @@ import anthropic
 from PIL import Image, ImageOps
 
 import gemini_ai
+import groq_ai
 
 MODEL = os.getenv("CLAUDE_MODEL", "claude-opus-5-5")
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
@@ -188,16 +189,25 @@ def get_client() -> anthropic.Anthropic | None:
     return anthropic.Anthropic()
 
 
-def ai_provider() -> str | None:
-    """'claude' if an Anthropic key is set, else 'gemini' if a Gemini key is set, else None."""
+def ai_providers() -> list[str]:
+    """Configured AI providers in the order they are tried: Claude, then Groq, then Gemini."""
+    out = []
     if os.getenv("ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_AUTH_TOKEN"):
-        return "claude"
+        out.append("claude")
+    if groq_ai.api_key():
+        out.append("groq")
     if gemini_ai.api_key():
-        return "gemini"
-    return None
+        out.append("gemini")
+    return out
 
 
-PROVIDER_LABEL = {"claude": "Claude", "gemini": "Google Gemini"}
+def ai_provider() -> str | None:
+    """The first configured provider (shown in the sidebar), or None."""
+    p = ai_providers()
+    return p[0] if p else None
+
+
+PROVIDER_LABEL = {"claude": "Claude", "gemini": "Google Gemini", "groq": "Groq"}
 
 
 def _call(client, **kwargs):
@@ -268,27 +278,56 @@ def analyze_image(jpeg: bytes, info: dict, client=None, model_preds: list[dict] 
                   model_info: str = "") -> Analysis:
     prompt = ("Details the person entered:\n" + describe_person(info) + "\n\n" + describe_model(model_preds, model_info)
               + "\n\nAnalyse the photo and fill in every field.")
-    if client is None and ai_provider() == "gemini":
-        data, model = gemini_ai.analyze(jpeg, prompt, SYSTEM_PROMPT, ANALYSIS_SCHEMA, AnalysisError)
+    if client is None:
+        providers = ai_providers()
+        if not providers:
+            raise AnalysisError("AI analysis isn't configured: add GROQ_API_KEY, GEMINI_API_KEY or "
+                                "ANTHROPIC_API_KEY to Secrets.")
+        errors_seen = []
+        for prov in providers:  # try each configured AI; fall back to the next one if it fails
+            try:
+                if prov == "groq":
+                    data, model = groq_ai.analyze(jpeg, prompt, SYSTEM_PROMPT, ANALYSIS_SCHEMA, AnalysisError)
+                elif prov == "gemini":
+                    data, model = gemini_ai.analyze(jpeg, prompt, SYSTEM_PROMPT, ANALYSIS_SCHEMA, AnalysisError)
+                else:
+                    data, model = _claude_analyze(get_client(), jpeg, prompt)
+                break
+            except AnalysisError as e:
+                errors_seen.append(f"{PROVIDER_LABEL[prov]}: {e}")
+        else:
+            raise AnalysisError(" | ".join(errors_seen))
     else:
-        client = client or get_client()
-        if client is None:
-            raise AnalysisError("AI analysis isn't configured: add GEMINI_API_KEY or ANTHROPIC_API_KEY to Secrets.")
-        resp = _call(
-            client,
-            system=SYSTEM_PROMPT,
-            output_config={"effort": "medium", "format": {"type": "json_schema", "schema": ANALYSIS_SCHEMA}},
-            messages=[{"role": "user", "content": [_image_block(jpeg), {"type": "text", "text": prompt}]}],
-        )
-        try:
-            data = json.loads(_text(resp))
-        except json.JSONDecodeError as e:
-            raise AnalysisError("The AI returned an unreadable answer. Please try again.") from e
-        model = getattr(resp, "model", MODEL)
+        data, model = _claude_analyze(client, jpeg, prompt)
     data = _normalise(data)
     rule_level, rule_flags = red_flag_rules(info)
     final = max(data["urgency"], rule_level, key=URGENCY_ORDER.index)
     return Analysis(data=data, urgency=final, rule_flags=rule_flags, model=model)
+
+
+def _claude_analyze(client, jpeg: bytes, prompt: str) -> tuple[dict, str]:
+    if client is None:
+        raise AnalysisError("AI analysis isn't configured: add ANTHROPIC_API_KEY to Secrets.")
+    resp = _call(
+        client,
+        system=SYSTEM_PROMPT,
+        output_config={"effort": "medium", "format": {"type": "json_schema", "schema": ANALYSIS_SCHEMA}},
+        messages=[{"role": "user", "content": [_image_block(jpeg), {"type": "text", "text": prompt}]}],
+    )
+    try:
+        data = json.loads(_text(resp))
+    except json.JSONDecodeError as e:
+        raise AnalysisError("The AI returned an unreadable answer. Please try again.") from e
+    return data, getattr(resp, "model", MODEL)
+
+
+def _provider_of(model: str) -> str:
+    m = (model or "").lower()
+    if m.startswith("claude"):
+        return "claude"
+    if "gemini" in m:
+        return "gemini"
+    return "groq"
 
 
 def start_chat(jpeg: bytes, info: dict, analysis: Analysis, model_preds: list[dict] | None = None,
@@ -296,10 +335,14 @@ def start_chat(jpeg: bytes, info: dict, analysis: Analysis, model_preds: list[di
     """Opening context for follow-up questions: the photo, the details, the model result and the analysis."""
     model_txt = ("\n\nTrained classifier (" + model_info + "): "
                  + "; ".join(f"{p['name']} {p['confidence']}%" for p in model_preds)) if model_preds else ""
-    if ai_provider() == "gemini":
-        return gemini_ai.start_chat(jpeg, "Details the person entered:\n" + describe_person(info) + model_txt
-                                    + "\n\nYour earlier analysis (JSON):\n" + json.dumps(analysis.data)
-                                    + f"\n\nFinal urgency shown to the person after safety rules: {analysis.urgency}.")
+    context = ("Details the person entered:\n" + describe_person(info) + model_txt
+               + "\n\nYour earlier analysis (JSON):\n" + json.dumps(analysis.data)
+               + f"\n\nFinal urgency shown to the person after safety rules: {analysis.urgency}.")
+    prov = _provider_of(analysis.model)  # chat continues with the AI that made the analysis
+    if prov == "gemini":
+        return gemini_ai.start_chat(jpeg, context)
+    if prov == "groq":
+        return groq_ai.start_chat(jpeg, context, FOLLOWUP_SYSTEM)
     return [{"role": "user", "content": [
         _image_block(jpeg),
         {"type": "text", "text": "Details the person entered:\n" + describe_person(info) + model_txt
@@ -312,6 +355,8 @@ def ask_followup(history: list[dict], question: str, client=None) -> str:
     """Append the question, call the AI, append its full reply (unchanged) and return the text."""
     if gemini_ai.is_history(history):
         return gemini_ai.ask(history, question, FOLLOWUP_SYSTEM, AnalysisError, client=client)
+    if groq_ai.is_history(history):
+        return groq_ai.ask(history, question, AnalysisError, client=client)
     client = client or get_client()
     if client is None:
         raise AnalysisError("AI chat isn't configured: add ANTHROPIC_API_KEY to the app's Secrets.")

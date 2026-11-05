@@ -76,9 +76,9 @@ def analyze_page(clf, ai_name: str | None):
     ai_ready = ai_name is not None
     ui.hero(f"Trained model · {len(clf.labels)} conditions" if clf else None, ai_name)
     if not ai_ready and clf is None:
-        st.error("Not set up yet: add a trained model to `models/` and/or an AI key (`GEMINI_API_KEY` or `ANTHROPIC_API_KEY`) to Secrets.")
+        st.error("Not set up yet: add a trained model to `models/` and/or an AI key (`GROQ_API_KEY`, `GEMINI_API_KEY` or `ANTHROPIC_API_KEY`) to Secrets.")
     elif not ai_ready:
-        st.info("Running with the trained model only. Add `GEMINI_API_KEY` (free) or `ANTHROPIC_API_KEY` for the detailed AI report and chat.")
+        st.info("Running with the trained model only. Add `GROQ_API_KEY` (free) for the detailed AI report and chat.")
     elif clf is None:
         st.info("No trained model in `models/` yet - using the AI's own image analysis.")
     ui.steps()
@@ -122,9 +122,9 @@ def analyze_page(clf, ai_name: str | None):
         used = st.session_state.get("used", 0)
         go = st.button("🔍 Analyze my skin", type="primary", width="stretch",
                        disabled=not (src and consent and code_ok and (clf or ai_ready)))
-        if az.ai_provider() == "gemini":
-            st.caption("ℹ️ The AI report uses Google Gemini's free tier. Google may use submitted photos and "
-                       "text to improve its services. This app itself does not store photos.")
+        if az.ai_provider():
+            st.caption(f"ℹ️ The AI report is made by {az.PROVIDER_LABEL[az.ai_provider()]}: your photo and details "
+                       "are sent to that service for analysis. This app itself does not store photos.")
         if not src:
             st.caption("Add a photo to continue.")
         elif not consent:
@@ -215,7 +215,7 @@ def show_result(a: az.Analysis | None, preds: list[dict] | None, info: dict, mod
                        "for the reason. Your trained model's prediction is shown above.")
         else:
             st.info("The detailed report (causes, care routine, when to see a doctor) and the follow-up chat need "
-                    "the AI. Add `GEMINI_API_KEY` (free) or `ANTHROPIC_API_KEY` in Secrets to turn them on.")
+                    "the AI. Add `GROQ_API_KEY` (free) in Secrets to turn them on.")
         st.download_button("⬇️ Download report", az.report_markdown(info, None, preds, model_info),
                            "skin-check-report.md", "text/markdown")
         return
@@ -378,7 +378,7 @@ def about_page():
 
 **How it works:** the photo is cleaned (rotation fixed, location data removed, resized). A **trained image
 classifier** (a deep-learning model trained on labelled skin-disease photos) predicts the most likely condition.
-The photo, your details and that prediction then go to a vision-capable AI model (Google Gemini or Claude), which checks the
+The photo, your details and that prediction then go to a vision-capable AI model (Groq, Google Gemini or Claude), which checks the
 prediction and writes a structured report. The app then applies its own
 **safety rules** to the symptoms you reported and raises the urgency when needed (for example fever with
 spreading redness, or a spot that bleeds or changes).
