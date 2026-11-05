@@ -37,11 +37,12 @@ def _friendly(e: Exception, AnalysisError):
     from google.genai import errors
     if isinstance(e, errors.ClientError):
         msg = str(getattr(e, "message", "") or e)
-        if e.code in (401, 403) or "API key" in msg or "API_KEY" in msg:
-            return AnalysisError("Google rejected the API key. Check GEMINI_API_KEY in Secrets.")
+        reason = f" Google says: {msg[:200]}" if msg else ""
         if e.code == 429:
             return AnalysisError("The free Gemini limit is reached for now. Please try again in a few minutes.")
-        return AnalysisError(f"The Gemini request failed ({e.code}).")
+        if e.code in (401, 403) or "API key" in msg or "API_KEY" in msg:
+            return AnalysisError(f"Google rejected the API key ({e.code}). Check GEMINI_API_KEY in Secrets.{reason}")
+        return AnalysisError(f"The Gemini request failed ({e.code}).{reason}")
     if isinstance(e, errors.ServerError):
         return AnalysisError("Gemini had a temporary problem. Please try again.")
     return AnalysisError("Couldn't reach Gemini. Check the internet connection.")

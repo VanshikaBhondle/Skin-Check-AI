@@ -210,8 +210,12 @@ def show_result(a: az.Analysis | None, preds: list[dict] | None, info: dict, mod
         ui.quote("🔎 AI review of the model's prediction:", a.data["classifier_assessment"])
 
     if a is None:
-        st.info("The detailed report (causes, care routine, when to see a doctor) and the follow-up chat need "
-                "the AI. Add `GEMINI_API_KEY` (free) or `ANTHROPIC_API_KEY` in Secrets to turn them on.")
+        if az.ai_provider():
+            st.warning("The AI report couldn't be created this time - see the red message above the results "
+                       "for the reason. Your trained model's prediction is shown above.")
+        else:
+            st.info("The detailed report (causes, care routine, when to see a doctor) and the follow-up chat need "
+                    "the AI. Add `GEMINI_API_KEY` (free) or `ANTHROPIC_API_KEY` in Secrets to turn them on.")
         st.download_button("⬇️ Download report", az.report_markdown(info, None, preds, model_info),
                            "skin-check-report.md", "text/markdown")
         return
